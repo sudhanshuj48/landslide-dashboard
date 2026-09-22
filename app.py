@@ -102,6 +102,40 @@ MAPBOX_ATTR = (
     "Improve this map</a></strong>"
 )
 
+# --- Free, no-key basemaps (always available, no signup/token needed) ---
+# These are real map tile services, just without the Mapbox paid-tier
+# styling. Used as the default so the map always renders even with zero
+# configuration. Mapbox (above) is offered as an optional upgrade only
+# if a token is present.
+FREE_BASEMAPS = {
+    "OpenStreetMap": {
+        "tiles": "OpenStreetMap",
+        "attr": None,  # folium supplies default attribution for named presets
+    },
+    "Terrain (OpenTopoMap)": {
+        "tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        "attr": (
+            'Map data: © <a href="https://www.openstreetmap.org/copyright">'
+            'OpenStreetMap</a> contributors, SRTM | Map style: © '
+            '<a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
+        ),
+    },
+    "Satellite (Esri World Imagery)": {
+        "tiles": (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/"
+            "World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        ),
+        "attr": (
+            "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, "
+            "and the GIS User Community"
+        ),
+    },
+    "Dark (CartoDB)": {
+        "tiles": "CartoDB dark_matter",
+        "attr": None,
+    },
+}
+
 
 # ---------------------------------------------------------
 # PAGE CONFIG + DARK THEME
@@ -316,31 +350,24 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("### 🗺️ Basemap")
+    # Free, no-key basemaps are always offered so the map is guaranteed to
+    # render with zero configuration. Mapbox styles are appended only if a
+    # token happens to be configured, as an optional upgrade.
+    basemap_options = list(FREE_BASEMAPS.keys())
     if MAPBOX_ACCESS_TOKEN:
-        map_style_label = st.selectbox("Map style", list(MAPBOX_STYLES.keys()), index=0)
-    else:
-        map_style_label = None
-        st.warning(
-            "No Mapbox token set — map falls back to free CartoDB tiles. "
-            "Add `MAPBOX_ACCESS_TOKEN` in st.secrets/env for real "
-            "terrain/satellite basemaps.",
-            icon="🗺️",
-        )
-        with st.expander("How to get a free Mapbox token"):
+        basemap_options = [f"Mapbox {k}" for k in MAPBOX_STYLES.keys()] + basemap_options
+    map_style_label = st.selectbox("Map style", basemap_options, index=0)
+    if not MAPBOX_ACCESS_TOKEN:
+        with st.expander("Want Mapbox terrain/satellite styling too? (optional)"):
             st.markdown(
-                "1. Sign up at [mapbox.com](https://www.mapbox.com/) (free tier, "
-                "no card required for the free quota).\n"
-                "2. Go to your [Account → Tokens](https://account.mapbox.com/access-tokens/) "
-                "page — a default public token is created automatically, or click "
-                "**Create a token**.\n"
-                "3. Copy the token (starts with `pk.`).\n"
-                "4. Add it as `MAPBOX_ACCESS_TOKEN` either in `.streamlit/secrets.toml`:\n"
-                "```toml\nMAPBOX_ACCESS_TOKEN = \"pk.your_token_here\"\n```\n"
-                "   or as an environment variable before running:\n"
-                "```bash\nexport MAPBOX_ACCESS_TOKEN=pk.your_token_here\n"
-                "streamlit run app.py\n```\n"
-                "5. Reload the app — the style picker above will appear once the "
-                "token is detected."
+                "The map already works with real tiles above — no key "
+                "needed. If you'd also like Mapbox's styled terrain/"
+                "satellite look:\n"
+                "1. Sign up free at [mapbox.com](https://www.mapbox.com/).\n"
+                "2. Copy your token from "
+                "[Account → Tokens](https://account.mapbox.com/access-tokens/).\n"
+                "3. Add it as `MAPBOX_ACCESS_TOKEN` in `.streamlit/secrets.toml` "
+                "or as an environment variable, then reload."
             )
 
     st.markdown("---")
@@ -431,19 +458,30 @@ map_col, gauge_col = st.columns([2, 1])
 with map_col:
     st.subheader("🗺️ Regional Risk Map")
 
-    if MAPBOX_ACCESS_TOKEN:
-        style_id = MAPBOX_STYLES[map_style_label]
+    if map_style_label.startswith("Mapbox ") and MAPBOX_ACCESS_TOKEN:
+        style_key = map_style_label.replace("Mapbox ", "")
+        style_id = MAPBOX_STYLES[style_key]
         m = folium.Map(
             location=[26.0, 92.5],
             zoom_start=6,
             tiles=mapbox_tile_url(style_id),
             attr=MAPBOX_ATTR,
         )
-        map_source_caption = f"Mapbox — {map_style_label}"
+        map_source_caption = map_style_label
     else:
-        # Free fallback basemap (no API key required) so the map always renders.
-        m = folium.Map(location=[26.0, 92.5], zoom_start=6, tiles="CartoDB dark_matter")
-        map_source_caption = "CartoDB (free fallback — set MAPBOX_ACCESS_TOKEN for terrain/satellite)"
+        basemap = FREE_BASEMAPS[map_style_label]
+        if basemap["attr"]:
+            m = folium.Map(
+                location=[26.0, 92.5],
+                zoom_start=6,
+                tiles=basemap["tiles"],
+                attr=basemap["attr"],
+            )
+        else:
+            # Named presets ("OpenStreetMap", "CartoDB dark_matter") carry
+            # their own built-in attribution in folium.
+            m = folium.Map(location=[26.0, 92.5], zoom_start=6, tiles=basemap["tiles"])
+        map_source_caption = f"{map_style_label} (free, no API key)"
 
     color_map = {"green": "#3ddc84", "yellow": "#ffd93d", "orange": "#ff9f45", "red": "#ff4b4b"}
 
