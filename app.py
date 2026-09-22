@@ -26,6 +26,10 @@ Fixes applied vs. previous version:
   9. Clear on-screen labeling of which values are LIVE (from ThingSpeak)
      vs SIMULATED (placeholder until real sensors/IMD/ISRO feeds are wired
      in), so the dashboard never silently mixes real and fake data.
+ 10. Real basemap: Mapbox terrain/satellite tiles wired in via
+     MAPBOX_ACCESS_TOKEN (st.secrets or env var), with a style picker
+     (Outdoors/Terrain, Satellite, Dark) and a graceful fallback to the
+     free CartoDB dark basemap if no token is configured.
 """
 
 import os
@@ -69,6 +73,34 @@ THINGSPEAK_READ_API_KEY = get_secret("THINGSPEAK_READ_API_KEY", "")  # set in st
 THINGSPEAK_URL = f"https://api.thingspeak.com/channels/{THINGSPEAK_CHANNEL_ID}/feeds.json"
 
 RISK_REFRESH_SECONDS = 60  # how long cached "live" readings stay valid
+
+# --- Mapbox (real basemap: terrain / satellite / dark tiles) ---
+# Get a free token at https://account.mapbox.com/access-tokens/ (free tier
+# covers ~50,000 map loads/month). Set it as MAPBOX_ACCESS_TOKEN in
+# st.secrets (Streamlit Cloud) or as an environment variable. Never
+# hardcode it in source.
+MAPBOX_ACCESS_TOKEN = get_secret("MAPBOX_ACCESS_TOKEN", "")
+
+MAPBOX_STYLES = {
+    "Outdoors (Terrain)": "outdoors-v12",
+    "Satellite": "satellite-streets-v12",
+    "Dark": "dark-v11",
+}
+
+
+def mapbox_tile_url(style_id: str) -> str:
+    return (
+        "https://api.mapbox.com/styles/v1/mapbox/"
+        f"{style_id}/tiles/{{z}}/{{x}}/{{y}}?access_token={MAPBOX_ACCESS_TOKEN}"
+    )
+
+
+MAPBOX_ATTR = (
+    '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> '
+    '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+    '<strong><a href="https://www.mapbox.com/map-feedback/" target="_blank">'
+    "Improve this map</a></strong>"
+)
 
 
 # ---------------------------------------------------------
@@ -282,6 +314,36 @@ with st.sidebar:
     simulate_storm = st.toggle("⛈️ Simulate Heavy Rainfall Event", value=False)
     auto_refresh = st.toggle(f"🔄 Live Auto-Refresh ({RISK_REFRESH_SECONDS}s)", value=False)
     st.markdown("---")
+
+    st.markdown("### 🗺️ Basemap")
+    if MAPBOX_ACCESS_TOKEN:
+        map_style_label = st.selectbox("Map style", list(MAPBOX_STYLES.keys()), index=0)
+    else:
+        map_style_label = None
+        st.warning(
+            "No Mapbox token set — map falls back to free CartoDB tiles. "
+            "Add `MAPBOX_ACCESS_TOKEN` in st.secrets/env for real "
+            "terrain/satellite basemaps.",
+            icon="🗺️",
+        )
+        with st.expander("How to get a free Mapbox token"):
+            st.markdown(
+                "1. Sign up at [mapbox.com](https://www.mapbox.com/) (free tier, "
+                "no card required for the free quota).\n"
+                "2. Go to your [Account → Tokens](https://account.mapbox.com/access-tokens/) "
+                "page — a default public token is created automatically, or click "
+                "**Create a token**.\n"
+                "3. Copy the token (starts with `pk.`).\n"
+                "4. Add it as `MAPBOX_ACCESS_TOKEN` either in `.streamlit/secrets.toml`:\n"
+                "```toml\nMAPBOX_ACCESS_TOKEN = \"pk.your_token_here\"\n```\n"
+                "   or as an environment variable before running:\n"
+                "```bash\nexport MAPBOX_ACCESS_TOKEN=pk.your_token_here\n"
+                "streamlit run app.py\n```\n"
+                "5. Reload the app — the style picker above will appear once the "
+                "token is detected."
+            )
+
+    st.markdown("---")
     st.caption(
         "Data sources: LIVE reading from ThingSpeak for "
         f"**{LIVE_DATA_STATION}** (needs THINGSPEAK_READ_API_KEY set in "
@@ -368,7 +430,21 @@ map_col, gauge_col = st.columns([2, 1])
 
 with map_col:
     st.subheader("🗺️ Regional Risk Map")
-    m = folium.Map(location=[26.0, 92.5], zoom_start=6, tiles="CartoDB dark_matter")
+
+    if MAPBOX_ACCESS_TOKEN:
+        style_id = MAPBOX_STYLES[map_style_label]
+        m = folium.Map(
+            location=[26.0, 92.5],
+            zoom_start=6,
+            tiles=mapbox_tile_url(style_id),
+            attr=MAPBOX_ATTR,
+        )
+        map_source_caption = f"Mapbox — {map_style_label}"
+    else:
+        # Free fallback basemap (no API key required) so the map always renders.
+        m = folium.Map(location=[26.0, 92.5], zoom_start=6, tiles="CartoDB dark_matter")
+        map_source_caption = "CartoDB (free fallback — set MAPBOX_ACCESS_TOKEN for terrain/satellite)"
+
     color_map = {"green": "#3ddc84", "yellow": "#ffd93d", "orange": "#ff9f45", "red": "#ff4b4b"}
 
     for name, info in NER_STATIONS.items():
@@ -387,6 +463,7 @@ with map_col:
             weight=2 if name == station else 1,
         ).add_to(m)
     st_folium(m, height=420, width=None)
+    st.caption(f"Basemap: {map_source_caption}")
 
 with gauge_col:
     st.subheader("📊 Risk Gauge")
