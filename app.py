@@ -484,12 +484,37 @@ with map_col:
         map_source_caption = f"{map_style_label} (free, no API key)"
 
     color_map = {"green": "#3ddc84", "yellow": "#ffd93d", "orange": "#ff9f45", "red": "#ff4b4b"}
+    # Radius (meters) of the shaded risk-area circle, scaled by risk score so
+    # higher risk stations show a visibly larger danger zone. Severe/HIGH
+    # risk stations are always rendered in red regardless of their base
+    # marker color, per the request to visually flag risk areas in red.
+    RISK_AREA_MIN_RADIUS_M = 4000
+    RISK_AREA_MAX_RADIUS_M = 18000
 
     for name, info in NER_STATIONS.items():
         s_is_live_capable = (name == LIVE_DATA_STATION)
         _, _, s_risk, s_is_live = get_station_reading(name, s_is_live_capable)
         lvl, clr, _ = risk_level(s_risk)
         tag = "LIVE" if s_is_live else "sim"
+
+        # Shaded risk-area circle: red for HIGH/SEVERE, otherwise the
+        # station's normal risk color, so danger zones stand out on the map.
+        area_color = "#ff4b4b" if lvl in ("HIGH", "SEVERE") else color_map[clr]
+        area_radius = RISK_AREA_MIN_RADIUS_M + (s_risk / 100) * (
+            RISK_AREA_MAX_RADIUS_M - RISK_AREA_MIN_RADIUS_M
+        )
+        folium.Circle(
+            location=[info["lat"], info["lon"]],
+            radius=area_radius,
+            color=area_color,
+            weight=1,
+            fill=True,
+            fill_color=area_color,
+            fill_opacity=0.30 if lvl in ("HIGH", "SEVERE") else 0.15,
+            popup=f"{name} — Risk Area<br>Level: {lvl} ({s_risk:.0f}) [{tag}]",
+        ).add_to(m)
+
+        # Station marker on top of the shaded risk area.
         folium.CircleMarker(
             location=[info["lat"], info["lon"]],
             radius=14 if name == station else 9,
@@ -497,11 +522,16 @@ with map_col:
             color=color_map[clr],
             fill=True,
             fill_color=color_map[clr],
-            fill_opacity=0.75,
+            fill_opacity=0.9,
             weight=2 if name == station else 1,
         ).add_to(m)
     st_folium(m, height=420, width=None)
     st.caption(f"Basemap: {map_source_caption}")
+    st.caption(
+        "🔴 Red shaded areas mark HIGH/SEVERE landslide risk zones "
+        "(radius scales with risk score). Other stations are shaded in "
+        "their own risk color at lower opacity."
+    )
 
 with gauge_col:
     st.subheader("📊 Risk Gauge")
