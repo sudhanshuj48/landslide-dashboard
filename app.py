@@ -240,12 +240,14 @@ def compute_risk_score(rainfall_24h: float, soil_moisture: float, slope_deg: flo
 
 
 def risk_level(score: float):
+    """3-tier color coding for at-a-glance risk reading:
+    green = safe/low, yellow = moderate, red = high/severe."""
     if score < 30:
         return "LOW", "green", "🟢"
     elif score < 55:
         return "MODERATE", "yellow", "🟡"
     elif score < 75:
-        return "HIGH", "orange", "🟠"
+        return "HIGH", "red", "🔴"
     else:
         return "SEVERE", "red", "🔴"
 
@@ -483,11 +485,9 @@ with map_col:
             m = folium.Map(location=[26.0, 92.5], zoom_start=6, tiles=basemap["tiles"])
         map_source_caption = f"{map_style_label} (free, no API key)"
 
-    color_map = {"green": "#3ddc84", "yellow": "#ffd93d", "orange": "#ff9f45", "red": "#ff4b4b"}
+    color_map = {"green": "#3ddc84", "yellow": "#ffd93d", "red": "#ff4b4b"}
     # Radius (meters) of the shaded risk-area circle, scaled by risk score so
-    # higher risk stations show a visibly larger danger zone. Severe/HIGH
-    # risk stations are always rendered in red regardless of their base
-    # marker color, per the request to visually flag risk areas in red.
+    # higher risk stations show a visibly larger danger zone.
     RISK_AREA_MIN_RADIUS_M = 4000
     RISK_AREA_MAX_RADIUS_M = 18000
 
@@ -497,20 +497,19 @@ with map_col:
         lvl, clr, _ = risk_level(s_risk)
         tag = "LIVE" if s_is_live else "sim"
 
-        # Shaded risk-area circle: red for HIGH/SEVERE, otherwise the
-        # station's normal risk color, so danger zones stand out on the map.
-        area_color = "#ff4b4b" if lvl in ("HIGH", "SEVERE") else color_map[clr]
+        # Shaded risk-area circle in the same red/yellow/green as the
+        # marker, so danger zones stand out on the map at a glance.
         area_radius = RISK_AREA_MIN_RADIUS_M + (s_risk / 100) * (
             RISK_AREA_MAX_RADIUS_M - RISK_AREA_MIN_RADIUS_M
         )
         folium.Circle(
             location=[info["lat"], info["lon"]],
             radius=area_radius,
-            color=area_color,
+            color=color_map[clr],
             weight=1,
             fill=True,
-            fill_color=area_color,
-            fill_opacity=0.30 if lvl in ("HIGH", "SEVERE") else 0.15,
+            fill_color=color_map[clr],
+            fill_opacity=0.30 if clr == "red" else 0.15,
             popup=f"{name} — Risk Area<br>Level: {lvl} ({s_risk:.0f}) [{tag}]",
         ).add_to(m)
 
@@ -528,9 +527,9 @@ with map_col:
     st_folium(m, height=420, width=None)
     st.caption(f"Basemap: {map_source_caption}")
     st.caption(
-        "🔴 Red shaded areas mark HIGH/SEVERE landslide risk zones "
-        "(radius scales with risk score). Other stations are shaded in "
-        "their own risk color at lower opacity."
+        "🔴 Red = HIGH/SEVERE risk &nbsp;|&nbsp; 🟡 Yellow = MODERATE risk "
+        "&nbsp;|&nbsp; 🟢 Green = LOW/safe risk. Shaded area radius scales "
+        "with the risk score."
     )
 
 with gauge_col:
